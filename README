@@ -1,0 +1,6 @@
+Ingenic JZ47xx USB loader utility
+=================================
+
+This program is a simple stage1/stage2 bootloader loader.
+It allows launching boot code over USB to devices equipped with the JZ47xx
+SoCs from Ingenic.
