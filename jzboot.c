@@ -41,6 +41,7 @@ static unsigned int stage2_load_addr = STAGE2_LOAD_ADDR;
 
 static FILE *stage1;
 static FILE *stage2;
+static FILE *devicetree;
 
 static const struct option options[] = {
 	{"help", no_argument, 0, 'h'},
@@ -59,7 +60,7 @@ static void usage(void)
 {
 	unsigned int i;
 
-	printf("Usage:\n\t" MY_NAME " [OPTIONS ...] stage1 [program]\n\nOptions:\n");
+	printf("Usage:\n\t" MY_NAME " [OPTIONS ...] stage1 [kernel] [devicetree]\n\nOptions:\n");
 	for (i = 0; options[i].name; i++)
 		printf("\t-%c, --%s\n\t\t\t%s\n",
 					options[i].val, options[i].name,
@@ -90,7 +91,8 @@ static int cmd_control(libusb_device_handle *hdl, uint32_t cmd, uint32_t attr)
 			NULL, 0, TIMEOUT_MS);
 }
 
-static int cmd_load_data(libusb_device_handle *hdl, FILE *f, uint32_t addr)
+static int cmd_load_data(libusb_device_handle *hdl, FILE *f,
+			 uint32_t addr, size_t *data_size)
 {
 	int ret, bytes_transferred;
 	size_t size, to_read;
@@ -101,6 +103,9 @@ static int cmd_load_data(libusb_device_handle *hdl, FILE *f, uint32_t addr)
 	fseek(f, 0, SEEK_END);
 	size = ftell(f);
 	fseek(f, 0, SEEK_SET);
+
+	if (data_size)
+		*data_size = size;
 
 	data = malloc(size);
 	if (!data)
@@ -152,6 +157,7 @@ int main(int argc, char **argv)
 	libusb_context *usb_ctx;
 	libusb_device_handle *hdl = NULL;
 	int exit_code = EXIT_FAILURE;
+	size_t kernel_size;
 	int ret, c;
 	unsigned int i;
 	char *end;
@@ -180,7 +186,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (optind == argc || argc > optind + 2) {
+	if (optind == argc || argc > optind + 3) {
 		fprintf(stderr, "Unable to parse arguments.\n");
 		usage();
 		return EXIT_FAILURE;
@@ -192,10 +198,18 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	if (argc == optind + 2) {
+	if (argc >= optind + 2) {
 		stage2 = fopen(argv[optind + 1], "r");
 		if (!stage2) {
 			fprintf(stderr, "Unable to open stage2 program\n");
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (argc >= optind + 3) {
+		devicetree = fopen(argv[optind + 2], "r");
+		if (!devicetree) {
+			fprintf(stderr, "Unable to open devicetree\n");
 			return EXIT_FAILURE;
 		}
 	}
@@ -231,7 +245,7 @@ int main(int argc, char **argv)
 
 	printf("Found Ingenic JZ%x based device\n", pid);
 
-	ret = cmd_load_data(hdl, stage1, stage1_load_addr);
+	ret = cmd_load_data(hdl, stage1, stage1_load_addr, NULL);
 	if (ret) {
 		fprintf(stderr, "Unable to upload stage1 bootloader\n");
 		goto out_close_dev_handle;
@@ -259,10 +273,19 @@ int main(int argc, char **argv)
 		goto out_close_dev_handle;
 	}
 
-	ret = cmd_load_data(hdl, stage2, stage2_load_addr);
+	ret = cmd_load_data(hdl, stage2, stage2_load_addr, &kernel_size);
 	if (ret) {
 		fprintf(stderr, "Unable to upload stage2 program\n");
 		goto out_close_dev_handle;
+	}
+
+	if (devicetree) {
+		ret = cmd_load_data(hdl, devicetree,
+				    stage2_load_addr + kernel_size, NULL);
+		if (ret) {
+			fprintf(stderr, "Unable to upload devicetree\n");
+			goto out_close_dev_handle;
+		}
 	}
 
 	ret = cmd_control(hdl, CMD_FLUSH_CACHES, 0);
@@ -288,5 +311,7 @@ out_close_files:
 	fclose(stage1);
 	if (stage2)
 		fclose(stage2);
+	if (devicetree)
+		fclose(devicetree);
 	return exit_code;
 }
