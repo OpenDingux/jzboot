@@ -30,6 +30,7 @@ enum commands {
 static const uint16_t ingenic_product_ids[] = {
 	0x4740,
 	0x4750,
+	0x4760,
 	0x4770,
 	0x4780,
 };
