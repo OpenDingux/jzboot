@@ -96,7 +96,7 @@ static int cmd_load_data(libusb_device_handle *hdl, FILE *f,
 			 uint32_t addr, size_t *data_size)
 {
 	int ret, bytes_transferred;
-	size_t size, to_read;
+	size_t size, to_read, to_write;
 	unsigned char *data;
 	char *ptr;
 
@@ -135,18 +135,22 @@ static int cmd_load_data(libusb_device_handle *hdl, FILE *f,
 	if (ret)
 		goto out_free;
 
-	/* Upload the data */
-	ret = libusb_bulk_transfer(hdl, LIBUSB_ENDPOINT_OUT | 0x1,
-			data, (int)size, &bytes_transferred, TIMEOUT_MS);
-	if (ret)
-		goto out_free;
+	ptr = (char *)data;
+	to_write = size;
 
-	if (bytes_transferred != (int)size) {
-		ret = -EINVAL;
-		goto out_free;
-	}
+	do {
+		ret = libusb_bulk_transfer(hdl, LIBUSB_ENDPOINT_OUT | 0x1,
+					   ptr, (int)to_write,
+					   &bytes_transferred, TIMEOUT_MS);
+		if (ret)
+			goto out_free;
 
-	printf("Uploaded %zu bytes at address 0x%08x\n", size, addr);
+		to_write -= bytes_transferred;
+		ptr += bytes_transferred;
+	} while (to_write > 0);
+
+	printf("Uploaded %lu bytes at address 0x%08x\n",
+	       (unsigned long)size, addr);
 
 out_free:
 	free(data);
