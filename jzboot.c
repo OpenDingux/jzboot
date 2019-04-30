@@ -193,14 +193,14 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	stage1 = fopen(argv[optind], "r");
+	stage1 = fopen(argv[optind], "rb");
 	if (!stage1) {
 		fprintf(stderr, "Unable to open stage1 program\n");
 		return EXIT_FAILURE;
 	}
 
 	if (argc >= optind + 2) {
-		stage2 = fopen(argv[optind + 1], "r");
+		stage2 = fopen(argv[optind + 1], "rb");
 		if (!stage2) {
 			fprintf(stderr, "Unable to open stage2 program\n");
 			return EXIT_FAILURE;
@@ -208,7 +208,7 @@ int main(int argc, char **argv)
 	}
 
 	if (argc >= optind + 3) {
-		devicetree = fopen(argv[optind + 2], "r");
+		devicetree = fopen(argv[optind + 2], "rb");
 		if (!devicetree) {
 			fprintf(stderr, "Unable to open devicetree\n");
 			return EXIT_FAILURE;
