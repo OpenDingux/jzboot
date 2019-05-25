@@ -9,8 +9,6 @@
 
 #define MY_NAME			"jzboot"
 
-#define INGENIC_VENDOR_ID	0x601A
-
 #define STAGE1_LOAD_ADDR	0x80000000
 #define STAGE2_LOAD_ADDR	0x81000000
 
@@ -25,6 +23,11 @@ enum commands {
 	CMD_FLUSH_CACHES,
 	CMD_START1,
 	CMD_START2,
+};
+
+static const uint16_t ingenic_ids[] = {
+	0x601a,
+	0xa108,
 };
 
 static const uint16_t ingenic_product_ids[] = {
@@ -163,8 +166,8 @@ int main(int argc, char **argv)
 	libusb_device_handle *hdl = NULL;
 	int exit_code = EXIT_FAILURE;
 	size_t kernel_size;
+	unsigned int i, j;
 	int ret, c;
-	unsigned int i;
 	char *end;
 
 	while ((c = getopt_long(argc, argv, "+ha:b:", options, NULL)) != -1) {
@@ -225,10 +228,13 @@ int main(int argc, char **argv)
 		goto out_close_files;
 	}
 
-	for (i = 0; !hdl && i < ARRAY_SIZE(ingenic_product_ids); i++) {
-		hdl = libusb_open_device_with_vid_pid(usb_ctx,
-			INGENIC_VENDOR_ID, ingenic_product_ids[i]);
+	for (j = 0; !hdl && j < ARRAY_SIZE(ingenic_ids); j++) {
+		for (i = 0; !hdl && i < ARRAY_SIZE(ingenic_product_ids); i++) {
+			hdl = libusb_open_device_with_vid_pid(usb_ctx,
+				ingenic_ids[j], ingenic_product_ids[i]);
+		}
 	}
+
 
 	if (!hdl) {
 		fprintf(stderr, "Unable to find Ingenic device.\n");
