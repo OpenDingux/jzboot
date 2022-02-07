@@ -44,6 +44,7 @@ static uint16_t pid;
 static unsigned int stage1_load_addr = STAGE1_LOAD_ADDR;
 static unsigned int stage2_load_addr = STAGE2_LOAD_ADDR;
 static unsigned int stage1_exec_addr = STAGE1_LOAD_ADDR;
+static unsigned int stage2_exec_addr = STAGE2_LOAD_ADDR;
 
 static FILE *stage1;
 static FILE *stage2;
@@ -97,6 +98,54 @@ static int cmd_control(libusb_device_handle *hdl, uint32_t cmd, uint32_t attr)
 			NULL, 0, TIMEOUT_MS);
 }
 
+/* NOTE: big endian fields */
+struct uimage_header {
+	uint32_t magic;    /* Magic number (UIMAGE_MAGIC) */
+	uint32_t hcrc;     /* Image header CRC */
+	uint32_t time;     /* Image creation timestamp */
+	uint32_t size;     /* Image data size */
+	uint32_t load;     /* Data load address */
+	uint32_t ep;       /* Entry point address */
+	uint32_t dcrc;     /* Image data CRC */
+	uint8_t  os;       /* Operating system */
+	uint8_t  arch;     /* CPU architecture */
+	uint8_t  type;     /* Image type */
+	uint8_t  comp;     /* Compression type */
+	uint8_t  name[32]; /* Image name */
+} __attribute__((packed));
+
+#define UIMAGE_MAGIC         0x27051956
+#define UIMAGE_ARCH_MIPS     5
+#define UIMAGE_COMPRESS_NONE 0
+
+static int check_and_process_uimage_hdr(char **data, size_t *size,
+					unsigned int *load_addr,
+					unsigned int *exec_addr)
+{
+	struct uimage_header *hdr = (struct uimage_header *)(*data);
+
+	if (*size < sizeof(struct uimage_header))
+		return -EINVAL;
+
+	if (be32toh(hdr->magic) != UIMAGE_MAGIC)
+		return 0; /* not an uimage */
+
+	if (hdr->arch != UIMAGE_ARCH_MIPS) {
+		fprintf(stderr, "UIMAGE: Unsupported architecture %02x\n", hdr->arch);
+		return -ENOTSUP;
+	}
+	if (hdr->comp != UIMAGE_COMPRESS_NONE) {
+		fprintf(stderr, "UIMAGE: loading compressed images not implemented\n");
+		return -ENOSYS;
+	}
+
+	*load_addr = be32toh(hdr->load);
+	*exec_addr = be32toh(hdr->ep);
+	*size -= sizeof(struct uimage_header);
+	*data += sizeof(struct uimage_header);
+	return 0;
+}
+
 static void skip_stage1_image_header(const unsigned char *data,
 				     unsigned int *exec_addr)
 {
@@ -127,9 +176,6 @@ static int cmd_load_data(libusb_device_handle *hdl, FILE *f,
 	size = ftell(f);
 	fseek(f, 0, SEEK_SET);
 
-	if (data_size)
-		*data_size = size;
-
 	data = malloc(size);
 	if (!data)
 		return -ENOMEM;
@@ -150,6 +196,15 @@ static int cmd_load_data(libusb_device_handle *hdl, FILE *f,
 	ptr = (char *)data;
 	if (addr == stage1_load_addr)
 		skip_stage1_image_header(ptr, &stage1_exec_addr);
+	else if (addr == stage2_load_addr) {
+		ret = check_and_process_uimage_hdr(&ptr, &size,
+					&addr, &stage2_exec_addr);
+		if (ret)
+			goto out_free;
+	}
+
+	if (data_size)
+		*data_size = size;
 
 	/* Send the SET_DATA_LEN command */
 	ret = cmd_control(hdl, CMD_SET_DATA_LEN, size);
@@ -207,6 +262,7 @@ int main(int argc, char **argv)
 			break;
 		case 'b':
 			stage2_load_addr = strtol(optarg, &end, 16);
+			stage2_exec_addr = stage2_load_addr;
 			if (optarg == end) {
 				fprintf(stderr, "Unable to parse stage2 addr\n");
 				return EXIT_FAILURE;
@@ -328,7 +384,7 @@ int main(int argc, char **argv)
 		goto out_close_dev_handle;
 	}
 
-	ret = cmd_control(hdl, CMD_START2, stage2_load_addr);
+	ret = cmd_control(hdl, CMD_START2, stage2_exec_addr);
 	if (ret) {
 		fprintf(stderr, "Unable to execute program\n");
 		goto out_close_dev_handle;
