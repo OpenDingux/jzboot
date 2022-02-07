@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <endian.h>
 
 #define MY_NAME			"jzboot"
 
@@ -42,6 +43,7 @@ static uint16_t pid;
 
 static unsigned int stage1_load_addr = STAGE1_LOAD_ADDR;
 static unsigned int stage2_load_addr = STAGE2_LOAD_ADDR;
+static unsigned int stage1_exec_addr = STAGE1_LOAD_ADDR;
 
 static FILE *stage1;
 static FILE *stage2;
@@ -95,6 +97,23 @@ static int cmd_control(libusb_device_handle *hdl, uint32_t cmd, uint32_t attr)
 			NULL, 0, TIMEOUT_MS);
 }
 
+static void skip_stage1_image_header(const unsigned char *data,
+				     unsigned int *exec_addr)
+{
+	const uint32_t *header_ptr = (const uint32_t*)data;
+
+	if (le32toh(header_ptr[0]) == 0x4d53504c)
+		/* `MSPL` header (jz4760+, jz4725b) */
+		*exec_addr += 4;
+	else if (le32toh(header_ptr[1]) == 0x55555555)
+		/* jz4750 header */
+		*exec_addr += 12;
+	else
+		/* assume no header or it just does NOPs (jz4740) */
+		;
+	return;
+}
+
 static int cmd_load_data(libusb_device_handle *hdl, FILE *f,
 			 uint32_t addr, size_t *data_size)
 {
@@ -128,6 +147,10 @@ static int cmd_load_data(libusb_device_handle *hdl, FILE *f,
 		to_read -= bytes_read;
 	} while (to_read > 0);
 
+	ptr = (char *)data;
+	if (addr == stage1_load_addr)
+		skip_stage1_image_header(ptr, &stage1_exec_addr);
+
 	/* Send the SET_DATA_LEN command */
 	ret = cmd_control(hdl, CMD_SET_DATA_LEN, size);
 	if (ret)
@@ -138,7 +161,6 @@ static int cmd_load_data(libusb_device_handle *hdl, FILE *f,
 	if (ret)
 		goto out_free;
 
-	ptr = (char *)data;
 	to_write = size;
 
 	do {
@@ -177,6 +199,7 @@ int main(int argc, char **argv)
 			return EXIT_SUCCESS;
 		case 'a':
 			stage1_load_addr = strtol(optarg, &end, 16);
+			stage1_exec_addr = stage1_load_addr;
 			if (optarg == end) {
 				fprintf(stderr, "Unable to parse stage1 addr\n");
 				return EXIT_FAILURE;
@@ -262,7 +285,7 @@ int main(int argc, char **argv)
 		goto out_close_dev_handle;
 	}
 
-	ret = cmd_control(hdl, CMD_START1, stage1_load_addr);
+	ret = cmd_control(hdl, CMD_START1, stage1_exec_addr);
 	if (ret) {
 		fprintf(stderr, "Unable to execute stage1 bootloader\n");
 		goto out_close_dev_handle;
